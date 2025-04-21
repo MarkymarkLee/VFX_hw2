@@ -1,8 +1,9 @@
+import os
 import cv2
 import numpy as np
 
 
-def harris_corner_detector(image, k=0.04, threshold=0.01, window_size=3):
+def harris_corner_detector(image, k=0.05, threshold=0.01, window_size=5):
     """
     Implement Harris Corner Detection from scratch
 
@@ -10,78 +11,84 @@ def harris_corner_detector(image, k=0.04, threshold=0.01, window_size=3):
         image: Input image
         k: Harris detector free parameter
         threshold: Threshold for corner detection
-        window_size: Size of the window for corner detection
+        window_size: Size of the window for corner detection. Should be odd.
 
     Returns:
         corners: List of (x, y) corner coordinates
     """
+
+    assert window_size % 2 == 1, "Window size must be odd"
+
     # Convert to grayscale if needed
     if len(image.shape) == 3:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     else:
         gray = image.copy()
 
-    # Convert to float for calculations
-    gray = np.float32(gray)
+    # Convert to float for calculations, normalize to [0, 1]
+    gray = np.float32(gray) / 255.0
 
     # Get image dimensions
     height, width = gray.shape
 
-    # Calculate image gradients using Sobel
-    Ix = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-    Iy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    # Calculate image gradients using Sobel (implemented from scratch)
+    # Define Sobel kernels
+    sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+    sobel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
+
+    # Apply Sobel filters to get gradients
+    Ix = cv2.filter2D(gray, -1, sobel_x)
+    Iy = cv2.filter2D(gray, -1, sobel_y)
 
     # Compute products of derivatives for the Harris matrix
     Ixx = Ix * Ix
     Iyy = Iy * Iy
     Ixy = Ix * Iy
 
-    # Create empty corner response map
-    corner_response = np.zeros_like(gray)
+    window = np.ones((window_size, window_size),
+                     dtype=np.float32) / (window_size * window_size)
 
-    # Define offset for window
+    # Apply Gaussian filter to the products of derivatives
+    Ixx = cv2.filter2D(Ixx, -1, window)
+    Iyy = cv2.filter2D(Iyy, -1, window)
+    Ixy = cv2.filter2D(Ixy, -1, window)
+
+    det = (Ixx * Iyy) - (Ixy * Ixy)
+    trace = Ixx + Iyy
+    # Compute corner response (Harris score)
+    corner_response = det - (k * (trace ** 2))
+
+    # corner_response -= np.min(corner_response)
+    # corner_response /= np.max(corner_response)
+
+    # Apply non-maximum suppression using numpy vectorized operations
+    # Create a response map with padding to make neighborhood operations easier
     offset = window_size // 2
+    response_padded = np.pad(corner_response, offset, mode='constant')
 
-    # Calculate Harris response for each pixel
-    for y in range(offset, height - offset):
-        for x in range(offset, width - offset):
-            # Extract window for current pixel
-            window_Ixx = Ixx[y-offset:y+offset+1, x-offset:x+offset+1]
-            window_Iyy = Iyy[y-offset:y+offset+1, x-offset:x+offset+1]
-            window_Ixy = Ixy[y-offset:y+offset+1, x-offset:x+offset+1]
+    # Create a mask for threshold
+    threshold_mask = corner_response > threshold
 
-            # Sum up elements in the window
-            sum_Ixx = np.sum(window_Ixx)
-            sum_Iyy = np.sum(window_Iyy)
-            sum_Ixy = np.sum(window_Ixy)
+    # For each pixel, create a boolean mask where it's a local maximum
+    local_max = np.ones_like(corner_response, dtype=bool)
 
-            # Calculate determinant and trace
-            det = (sum_Ixx * sum_Iyy) - (sum_Ixy**2)
-            trace = sum_Ixx + sum_Iyy
+    for dy in range(window_size):
+        for dx in range(window_size):
+            shifted = response_padded[dy:dy+height, dx:dx+width]
+            local_max &= (corner_response >= shifted)
 
-            # Calculate corner response R = det(M) - k*(trace(M))^2
-            R = det - k * (trace**2)
+    # Combine the threshold mask and local maximum mask
+    corner_mask = threshold_mask & local_max
 
-            corner_response[y, x] = R
-
-    # Normalize corner response
-    cv2.normalize(corner_response, corner_response, 0, 1, cv2.NORM_MINMAX)
-
-    # Apply non-maximum suppression
-    corners = []
-    for y in range(offset, height - offset):
-        for x in range(offset, width - offset):
-            # If pixel is above threshold and is local maximum
-            if corner_response[y, x] > threshold:
-                # Check if it's a local maximum in 3x3 neighborhood
-                window = corner_response[y-1:y+2, x-1:x+2]
-                if corner_response[y, x] == np.max(window):
-                    corners.append((x, y))
+    # Get the coordinates of the corners
+    corner_indices = np.argwhere(corner_mask)
+    # Convert to (x, y) format from (row, col)
+    corners = [(int(x), int(y)) for y, x in corner_indices]
 
     return corners
 
 
-def extract_msop_descriptors(image, corners, patch_size=41):
+def get_msop_features(image, depth=3):
     """
     Extract Multi-Scale Oriented Patches (MSOP) descriptors
 
@@ -93,71 +100,233 @@ def extract_msop_descriptors(image, corners, patch_size=41):
     Returns:
         descriptors: List of MSOP descriptors for each corner
     """
-    # Convert to grayscale if needed
-    if len(image.shape) == 3:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = image.copy()
 
-    # Create Gaussian kernel for blurring
-    sigma = 0.5 * (patch_size // 2)
-    ksize = int(6 * sigma + 1)
-    if ksize % 2 == 0:
-        ksize += 1
+    h, w = image.shape[:2]
 
-    # Apply Gaussian blur
-    blurred = cv2.GaussianBlur(gray, (ksize, ksize), sigma)
+    if image.ndim == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = np.float32(image)
 
-    # Get image dimensions
-    height, width = gray.shape
+    pyramid = [image]
+    # Create Gaussian pyramid
+    for i in range(depth - 1):
+        P_i = cv2.GaussianBlur(pyramid[-1], (-1, -1), 1)
+        P_i = cv2.resize(P_i, (P_i.shape[1] // 2, P_i.shape[0] // 2))
+        pyramid.append(P_i)
 
-    # Half patch size for boundary checks
-    half_patch = patch_size // 2
+    interesting_points = []
+    for i, p in enumerate(pyramid):
+        # Calculate image gradients using Sobel
+        # Define Sobel kernels
+        sobel_x = np.array(
+            [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float32)
+        sobel_y = np.array(
+            [[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float32)
+        delta_P_l_x = cv2.filter2D(p, -1, sobel_x)
+        delta_P_l_y = cv2.filter2D(p, -1, sobel_y)
+        delta_P_l_x = cv2.GaussianBlur(delta_P_l_x, (-1, -1), 1)
+        delta_P_l_y = cv2.GaussianBlur(delta_P_l_y, (-1, -1), 1)
 
-    # Store descriptors
-    descriptors = []
-    valid_corners = []
+        # compute outer product of gradients
+        h = p.shape[0]
+        w = p.shape[1]
+        outer_product = np.zeros((h, w, 2, 2), dtype=np.float32)
+        outer_product[:, :, 0, 0] = delta_P_l_x * delta_P_l_x
+        outer_product[:, :, 0, 1] = delta_P_l_x * delta_P_l_y
+        outer_product[:, :, 1, 0] = delta_P_l_x * delta_P_l_y
+        outer_product[:, :, 1, 1] = delta_P_l_y * delta_P_l_y
 
-    for x, y in corners:
-        # Skip corners too close to the image boundary
-        if x < half_patch or x >= width - half_patch or y < half_patch or y >= height - half_patch:
-            continue
+        outer_product[:, :, 0, 0] = cv2.GaussianBlur(
+            outer_product[:, :, 0, 0], (-1, -1), 1.5)
+        outer_product[:, :, 0, 1] = cv2.GaussianBlur(
+            outer_product[:, :, 0, 1], (-1, -1), 1.5)
+        outer_product[:, :, 1, 0] = cv2.GaussianBlur(
+            outer_product[:, :, 1, 0], (-1, -1), 1.5)
+        outer_product[:, :, 1, 1] = cv2.GaussianBlur(
+            outer_product[:, :, 1, 1], (-1, -1), 1.5)
 
-        # Extract patch
-        patch = blurred[y - half_patch:y + half_patch +
-                        1, x - half_patch:x + half_patch + 1]
+        det = outer_product[:, :, 0, 0] * outer_product[:, :, 1, 1] - \
+            outer_product[:, :, 0, 1] * outer_product[:, :, 1, 0]
+        trace = outer_product[:, :, 0, 0] + outer_product[:, :, 1, 1]
 
-        # Normalize patch (zero mean and unit variance)
-        patch = (patch - np.mean(patch)) / (np.std(patch) + 1e-7)
+        f_HM = det / (trace + 1e-6)
 
-        # Flatten patch to create descriptor
-        descriptor = patch.flatten()
+        threshold_mask = f_HM > 10
 
-        # Add to list
-        descriptors.append(descriptor)
-        valid_corners.append((x, y))
+        padded_f_HM = np.pad(f_HM, ((1, 1), (1, 1)), mode='constant')
+        local_max = np.ones_like(f_HM, dtype=bool)
+        for dy in range(3):
+            for dx in range(3):
+                shifted = padded_f_HM[dy:dy + h, dx:dx + w]
+                local_max &= (f_HM >= shifted)
+        final_mask = threshold_mask & local_max
 
-    return descriptors, valid_corners
+        corners = np.argwhere(final_mask)
+
+        # find_theta
+        delta_P_lo_x = cv2.filter2D(p, -1, sobel_x)
+        delta_P_lo_y = cv2.filter2D(p, -1, sobel_y)
+        delta_P_lo_x = cv2.GaussianBlur(delta_P_lo_x, (-1, -1), 4.5)
+        delta_P_lo_y = cv2.GaussianBlur(delta_P_lo_y, (-1, -1), 4.5)
+
+        thetas = np.arctan2(delta_P_lo_y, delta_P_lo_x)
+        theta = thetas[corners[:, 0], corners[:, 1]]
+        scores = f_HM[corners[:, 0], corners[:, 1]]
+        depths = np.ones(corners.shape[0], dtype=np.float32) * i
+
+        cur_points = np.array(
+            [corners[:, 1], corners[:, 0], theta, scores, depths]).T
+
+        # make all interesting points into a numpy array of [x, y, theta, score]
+        interesting_points.append(cur_points)
+
+    interesting_points = np.concatenate(interesting_points, axis=0)
+
+    return interesting_points
 
 
-def detect_features(image):
+def adaptive_non_maximal_suppression(interesting_points, maximum_points):
+    """
+    Perform adaptive non-maximal suppression on the scores
+
+    Args:
+        interesting_points: Array of interesting points
+        maximum_points: Maximum number of points to keep
+
+    Returns:
+        suppressed_scores: Array of suppressed scores
+    """
+    n = interesting_points.shape[0]
+    if n < maximum_points:
+        return interesting_points
+
+    min_distance = np.zeros(n, dtype=np.float32)
+    for i in range(n):
+        x1, y1 = interesting_points[i, :2]
+        score = interesting_points[i, 3]
+        mask = interesting_points[:, 3] * 0.9 > score
+        mask[i] = False
+        x2 = interesting_points[mask, 0]
+        y2 = interesting_points[mask, 1]
+        distances = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+        min_distance[i] = np.min(distances) if distances.size > 0 else 0
+
+    sorted_indices = np.argsort(min_distance)[::-1]
+
+    suppressed_scores = interesting_points[sorted_indices[:maximum_points]]
+
+    return np.array(suppressed_scores)
+
+
+def get_msop_descriptors(image, points, patch_size=8, spacing=5):
+
+    n = points.shape[0]
+    m = patch_size * patch_size
+
+    if image.shape[2] == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = np.float32(image)
+
+    patch_indices = []
+    # create a patch index [[0,0], [0,1], [0,2], ... , [1,0], ..., [patch_size-1, patch_size-1]]
+    patch_indices = np.array(
+        [[i, j] for i in range(patch_size) for j in range(patch_size)], dtype=np.float32)
+    patch_indices = patch_indices - (patch_size - 1) / 2
+
+    sizes = points[:, 4] + 1
+
+    theta = points[:, 2]
+    rotation_matrices = np.zeros((points.shape[0], 2, 2), dtype=np.float32)
+    rotation_matrices[:, 0, 0] = np.cos(theta)
+    rotation_matrices[:, 0, 1] = -np.sin(theta)
+    rotation_matrices[:, 1, 0] = np.sin(theta)
+    rotation_matrices[:, 1, 1] = np.cos(theta)
+
+    patch_indices = rotation_matrices[:, np.newaxis,
+                                      :, :] @ patch_indices[np.newaxis, :, :, np.newaxis]
+    patch_indices = patch_indices.reshape(n, m, 2)
+
+    patch_indices *= sizes[:, np.newaxis, np.newaxis]
+
+    patch_indices *= spacing
+
+    patch_indices = points[:, np.newaxis, :2] + patch_indices
+
+    patch_indices = patch_indices.astype(np.int32)
+
+    patch_indices[:, :, 0] = np.clip(
+        patch_indices[:, :, 0], 0, image.shape[0] - 1)
+    patch_indices[:, :, 1] = np.clip(
+        patch_indices[:, :, 0], 0, image.shape[1] - 1)
+
+    features = image[patch_indices[:, :, 0], patch_indices[:, :, 1]]
+
+    return points, features
+
+
+def draw_points(image_file, image, corners, output_folder):
+    """
+    Draw corners on the image and save to output folder
+
+    Args:
+        image: Input image
+        corners: List of corner coordinates (x, y)
+        output_folder: Folder to save the output images
+
+    Returns:
+        None
+    """
+    # Convert to color if needed
+    if len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    # Draw corners
+    for c in corners:
+        x = int(c[0])
+        y = int(c[1])
+        theta = c[2]
+        size = int(c[4] * 10 + 10)
+
+        rect = cv2.boxPoints(
+            ((x, y), (size, size), theta * 180 / np.pi)).astype(int)
+        # Draw the rectangle
+        cv2.polylines(image, [rect], isClosed=True,
+                      color=(0, 0, 255), thickness=2)
+
+    # Save the image with corners drawn
+    output_path = os.path.join(output_folder, "corners_" + image_file)
+    cv2.imwrite(output_path, image)
+
+
+def detect_features(image_file, image, output_folder, max_points=250):
     """
     Detect features in an image using Harris corner detector and MSOP descriptors
 
     Args:
         image: Input image
+        output_folder: Folder to save the output images
 
     Returns:
         features: Dictionary containing keypoints and descriptors
     """
-    # Detect corners using Harris
-    corners = harris_corner_detector(image)
+    # # Detect corners using Harris
+    # corners = harris_corner_detector(image)
 
-    # Extract MSOP descriptors
-    descriptors, valid_corners = extract_msop_descriptors(image, corners)
+    # draw_corners(image_file, image, corners, output_folder)
+
+    # # Extract MSOP descriptors
+    # descriptors, valid_corners = get_msop_features(image, corners)
+
+    keypoints = get_msop_features(image)
+
+    keypoints = adaptive_non_maximal_suppression(keypoints, max_points)
+
+    keypoints, features = get_msop_descriptors(image, keypoints)
+
+    draw_points(image_file, image, keypoints, output_folder)
 
     # Return features
     return {
-        'keypoints': valid_corners,
-        'descriptors': descriptors
+        'keypoints': keypoints[:, :2],
+        'descriptors': features
     }
