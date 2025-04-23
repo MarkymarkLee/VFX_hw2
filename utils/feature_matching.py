@@ -1,13 +1,13 @@
 import numpy as np
+from scipy.spatial import KDTree
 
 
-def match_features(features_dict, ratio_threshold=0.8):
+def match_features(features_dict):
     """
     Match features between image pairs using ratio test
 
     Args:
-        features_dict: Dictionary with image filenames as keys and feature dictionaries as values
-        ratio_threshold: Threshold for Lowe's ratio test
+        features_dict: Dictionary with image filenames as keys and feature dictionaries as values, file dictionaries have 2 keys: "keypoints" and "descriptors"
 
     Returns:
         matches: Dictionary with image pairs as keys and matched keypoints as values
@@ -18,51 +18,62 @@ def match_features(features_dict, ratio_threshold=0.8):
     # Get list of image names
     image_names = list(features_dict.keys())
 
-    # Compare each pair of images
-    for i in range(len(image_names)):
-        for j in range(i + 1, len(image_names)):
-            img1_name = image_names[i]
-            img2_name = image_names[j]
+    # Combine all descriptors and keep track of their image and keypoint indices
+    all_descriptors = []
+    # Store (image_name, keypoint_idx) for each descriptor
+    descriptor_sources = []
 
-            # Get features for both images
-            img1_features = features_dict[img1_name]
-            img2_features = features_dict[img2_name]
+    for img_name in image_names:
+        img_features = features_dict[img_name]
+        descriptors = img_features['descriptors']
 
-            # Get keypoints and descriptors
-            kp1 = img1_features['keypoints']
-            desc1 = img1_features['descriptors']
-            kp2 = img2_features['keypoints']
-            desc2 = img2_features['descriptors']
+        if not isinstance(descriptors, np.ndarray):
+            descriptors = np.array(descriptors)
 
-            # Convert lists to numpy arrays for faster computation
-            if not isinstance(desc1, np.ndarray):
-                desc1 = np.array(desc1)
-            if not isinstance(desc2, np.ndarray):
-                desc2 = np.array(desc2)
+        for idx, desc in enumerate(descriptors):
+            all_descriptors.append(desc)
+            descriptor_sources.append((img_name, idx))
 
-            # Match descriptors using nearest neighbor and ratio test
-            matched_pairs = []
+    # Convert to numpy array for KD-tree
+    all_descriptors = np.array(all_descriptors)
 
-            # For each descriptor in first image
-            for idx1, desc in enumerate(desc1):
-                # Calculate Euclidean distances to all descriptors in second image
-                distances = np.sqrt(np.sum((desc2 - desc) ** 2, axis=1))
+    # Create KD-tree with all descriptors from all images
+    tree = KDTree(all_descriptors)
 
-                # Sort distances and get indices of two closest matches
-                sorted_idx = np.argsort(distances)
+    # For each descriptor, find the 4 closest descriptors across all images
+    k = 5  # 5 instead of 4 because the closest will be the descriptor itself
+    _, indices = tree.query(all_descriptors, k=k)
 
-                # Apply Lowe's ratio test (if second best match is significantly worse than first)
-                if len(sorted_idx) >= 2:
-                    best_idx = sorted_idx[0]
-                    second_best_idx = sorted_idx[1]
+    # Process matches
+    for i, neighbors in enumerate(indices):
+        source_img, source_idx = descriptor_sources[i]
+        source_kp = features_dict[source_img]['keypoints'][source_idx]
 
-                    # If best match is significantly better than second best
-                    if distances[best_idx] < ratio_threshold * distances[second_best_idx]:
-                        matched_pairs.append((kp1[idx1], kp2[best_idx]))
+        # Skip the first match (which is the descriptor itself)
+        for j in neighbors:  # Skip the first match (self)
+            target_img, target_idx = descriptor_sources[j]
 
-            # Store matches if any were found
-            if matched_pairs:
-                pair_key = (img1_name, img2_name)
-                matches[pair_key] = matched_pairs
+            # Skip if it's the same image
+            if source_img == target_img:
+                continue
+
+            target_kp = features_dict[target_img]['keypoints'][target_idx]
+
+            # Ensure consistent order of image pairs in the key
+            if source_img < target_img:
+                pair_key = (source_img, target_img)
+                kp_pair = (tuple(source_kp), tuple(target_kp))
+            else:
+                pair_key = (target_img, source_img)
+                kp_pair = (tuple(target_kp), tuple(source_kp))
+
+            # Initialize list for this pair if it doesn't exist
+            if pair_key not in matches:
+                matches[pair_key] = []
+
+            matches[pair_key].append(kp_pair)
+
+    for pair_key in matches:
+        matches[pair_key] = list(set(matches[pair_key]))
 
     return matches

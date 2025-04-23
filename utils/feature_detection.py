@@ -218,7 +218,7 @@ def adaptive_non_maximal_suppression(interesting_points, maximum_points):
     return np.array(suppressed_scores)
 
 
-def get_msop_descriptors(image, points, patch_size=8, spacing=5):
+def get_msop_descriptors(image, points, patch_size=8, spacing=2):
 
     n = points.shape[0]
     m = patch_size * patch_size
@@ -255,11 +255,11 @@ def get_msop_descriptors(image, points, patch_size=8, spacing=5):
     patch_indices = patch_indices.astype(np.int32)
 
     patch_indices[:, :, 0] = np.clip(
-        patch_indices[:, :, 0], 0, image.shape[0] - 1)
-    patch_indices[:, :, 1] = np.clip(
         patch_indices[:, :, 0], 0, image.shape[1] - 1)
+    patch_indices[:, :, 1] = np.clip(
+        patch_indices[:, :, 1], 0, image.shape[0] - 1)
 
-    features = image[patch_indices[:, :, 0], patch_indices[:, :, 1]]
+    features = image[patch_indices[:, :, 1], patch_indices[:, :, 0]]
 
     return points, features
 
@@ -285,20 +285,20 @@ def draw_points(image_file, image, corners, output_folder):
         x = int(c[0])
         y = int(c[1])
         theta = c[2]
-        size = int(c[4] * 10 + 10)
+        size = int(c[4] * 8 + 8) * 2
 
         rect = cv2.boxPoints(
             ((x, y), (size, size), theta * 180 / np.pi)).astype(int)
         # Draw the rectangle
         cv2.polylines(image, [rect], isClosed=True,
-                      color=(0, 0, 255), thickness=2)
+                      color=(0, 0, 255), thickness=1)
 
     # Save the image with corners drawn
     output_path = os.path.join(output_folder, "corners_" + image_file)
     cv2.imwrite(output_path, image)
 
 
-def detect_features(image_file, image, output_folder, max_points=250):
+def detect_features(image_file, image, output_folder, max_points=250, draw=False):
     """
     Detect features in an image using Harris corner detector and MSOP descriptors
 
@@ -309,13 +309,6 @@ def detect_features(image_file, image, output_folder, max_points=250):
     Returns:
         features: Dictionary containing keypoints and descriptors
     """
-    # # Detect corners using Harris
-    # corners = harris_corner_detector(image)
-
-    # draw_corners(image_file, image, corners, output_folder)
-
-    # # Extract MSOP descriptors
-    # descriptors, valid_corners = get_msop_features(image, corners)
 
     keypoints = get_msop_features(image)
 
@@ -323,7 +316,9 @@ def detect_features(image_file, image, output_folder, max_points=250):
 
     keypoints, features = get_msop_descriptors(image, keypoints)
 
-    draw_points(image_file, image, keypoints, output_folder)
+    if draw:
+        # Draw corners on the image and save to output folder
+        draw_points(image_file, image, keypoints, output_folder)
 
     # Return features
     return {
