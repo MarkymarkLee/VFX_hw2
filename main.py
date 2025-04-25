@@ -1,13 +1,13 @@
 import argparse
 import os
 from PIL import Image
+import cv2
 import numpy as np
 import shutil
-from utils.cylindrical_projection import cylindrical_project
+from utils.draw_comparisons import draw_comparisons
 from utils.feature_detection import detect_features
 from utils.feature_matching import match_features
 from utils.image_matching import match_images
-from utils.bundle_adjustment import adjust_bundle
 from utils.blending import blend_images
 from utils.alignment import align_end_to_end
 from utils.rectangling import rectangle_panorama
@@ -91,17 +91,18 @@ def create_panoramas(input_folder, output_folder):
 
     # 0. Cylindrical projection
     # Use a random focal length as the radius
-    radius = None
-    if focal_lengths and radius is None:
-        # Use the first focal length as radius
-        radius = list(focal_lengths.values())[0] + 1.0
-    print(f"Performing cylindrical projection with radius {radius}...")
-    for i in range(len(images)):
-        img_file, img = images[i]
-        focal_length = focal_lengths.get(img_file, None)
-        assert focal_length is not None, f"Focal length not found for {img_file}"
-        img = cylindrical_project(img, focal_length, radius)
-        images[i] = (img_file, img)
+    # radius = None
+    # if focal_lengths and radius is None:
+    #     # Use the first focal length as radius
+    #     radius = list(focal_lengths.values())[0] * 2
+    # print(f"Performing cylindrical projection with radius {radius}...")
+    # for i in range(len(images)):
+    #     img_file, img = images[i]
+    #     focal_length = focal_lengths.get(img_file, None)
+    #     assert focal_length is not None, f"Focal length not found for {img_file}"
+    #     img = cylindrical_project(img, focal_length, radius)
+    #     images[i] = (img_file, img)
+    #     # cv2.imwrite(os.path.join(output_folder, "projected_" + img_file), img)
 
     # 1. Detect features in all images
     print("Detecting features...")
@@ -109,25 +110,26 @@ def create_panoramas(input_folder, output_folder):
     for img_file, img in images:
         print(f"Processing {img_file}...", end='\r')
         features[img_file] = detect_features(
-            img_file, img, output_folder, draw=True)
+            img_file, img, output_folder)
 
     print("\nFeature detection complete.")
 
     # 2. Match features between image pairs
     print("Matching features...")
-    matches = match_features(features, )
+    matches = match_features(features)
 
     # 3. Find consistent image matches
     print("Finding consistent image matches...")
     consistent_matches = match_images(matches)
 
-    # 4. Bundle adjustment to optimize camera parameters
-    print("Optimizing camera parameters...")
-    camera_params = adjust_bundle(consistent_matches)
+    # draw_comparisons(images, consistent_matches)
 
     # 5. Perform image blending
     print("Blending images...")
-    panorama = blend_images(images, camera_params)
+    panorama = blend_images(images, consistent_matches, focal_lengths)
+    panorama.save(f"{output_folder}/panorama.jpg")
+
+    exit()
 
     # 6. End-to-end alignment
     print("Performing end-to-end alignment...")

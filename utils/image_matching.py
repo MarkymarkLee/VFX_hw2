@@ -90,7 +90,7 @@ def calc_inliers(H, src_points, dst_points, distance_threshold):
     return inliers
 
 
-def ransac_homography(matches, max_iterations=10000, distance_threshold=5.0):
+def ransac_homography(matches, max_iterations=10000, distance_threshold=3.0):
     """
     Use RANSAC to find the best homography matrix
 
@@ -196,7 +196,7 @@ def filter_pairs_by_matches(feature_matches, max_matches_per_image=6):
     return filtered_pairs
 
 
-def match_images(feature_matches, max_matches_per_image=3, inlier_threshold=20):
+def match_images(feature_matches, max_matches_per_image=3):
     """
     Find consistent image matches using RANSAC, limiting each image 
     to match with only the top N images that have the most matches with it
@@ -219,6 +219,7 @@ def match_images(feature_matches, max_matches_per_image=3, inlier_threshold=20):
         if pair in feature_matches:
             img1_name, img2_name = pair
             matches = feature_matches[pair]
+            inlier_threshold = 5 + 0.22 * len(matches)
 
             # Find homography using RANSAC
             H, inliers = ransac_homography(matches)
@@ -232,11 +233,11 @@ def match_images(feature_matches, max_matches_per_image=3, inlier_threshold=20):
                 # Store the homography and inliers
                 consistent_matches[pair] = (H, inliers)
                 colored_print(
-                    f"ACCEPTED: {len(inliers)} matches between {img1_name} and {img2_name}",
+                    f"ACCEPTED: {inliers_count}/{len(matches)} matches for {img1_name} and {img2_name}",
                     color='green')
             else:
                 colored_print(
-                    f"REJECTED: {inliers_count} < {inlier_threshold} for {img1_name} and {img2_name}",
+                    f"REJECTED: {inliers_count}/{len(matches)} matches for {img1_name} and {img2_name}",
                     color='red')
 
     return consistent_matches

@@ -88,7 +88,7 @@ def harris_corner_detector(image, k=0.05, threshold=0.01, window_size=5):
     return corners
 
 
-def get_msop_features(image, depth=3):
+def get_msop_features(image, depth=4):
     """
     Extract Multi-Scale Oriented Patches (MSOP) descriptors
 
@@ -218,12 +218,12 @@ def adaptive_non_maximal_suppression(interesting_points, maximum_points):
     return np.array(suppressed_scores)
 
 
-def get_msop_descriptors(image, points, patch_size=8, spacing=2):
+def get_msop_descriptors(image, points, patch_size=10, spacing=2):
 
     n = points.shape[0]
     m = patch_size * patch_size
 
-    if image.shape[2] == 3:
+    if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     image = np.float32(image)
 
@@ -298,7 +298,7 @@ def draw_points(image_file, image, corners, output_folder):
     cv2.imwrite(output_path, image)
 
 
-def detect_features(image_file, image, output_folder, max_points=250, draw=False):
+def detect_features(image_file, image, output_folder, max_points=1000, draw=False):
     """
     Detect features in an image using Harris corner detector and MSOP descriptors
 
