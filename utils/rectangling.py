@@ -1,58 +1,74 @@
 import cv2
 import numpy as np
-from PIL import Image
 
 
-def find_largest_rectangle(mask):
+def find_fitting_curve(points):
     """
-    Find the largest rectangle within a panorama mask
+    Find the best fitting curve for the given points using polynomial regression.
 
     Args:
-        mask: Binary mask of the panorama (non-zero where there's content)
+        points (numpy.ndarray): The input points.
 
     Returns:
-        rect: (x, y, width, height) of the largest rectangle
+        fitted_curve (numpy.ndarray): The new points with the same x.
     """
-    # Find contours in the mask
-    contours, _ = cv2.findContours(
-        mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # If no contours found, return the whole image
-    if not contours:
-        return (0, 0, mask.shape[1], mask.shape[0])
-
-    # Find the largest contour
-    largest_contour = max(contours, key=cv2.contourArea)
-
-    # Get the bounding rectangle
-    x, y, w, h = cv2.boundingRect(largest_contour)
-
-    return (x, y, w, h)
+    x = np.arange(len(points))
+    y = points
+    z = np.polyfit(x, y, 5)
+    new_points = np.polyval(z, x)
+    return new_points
 
 
-def rectangle_panorama(panorama):
+def rectangle_panorama(panorama, panorama_mask, window=50):
     """
-    Crop the panorama to a rectangular shape, removing irregular boundaries
+    Rectangles the panorama image using the provided mask.
 
     Args:
-        panorama: Input panorama image
+        panorama (numpy.ndarray): The input panorama image.
+        panorama_mask (numpy.ndarray): The mask for the panorama image.
 
     Returns:
-        rectangled_panorama: Panorama cropped to a rectangular shape
+        numpy.ndarray: The rectangled panorama image.
     """
-    # Convert to numpy array if it's a PIL Image
-    if isinstance(panorama, Image.Image):
-        panorama = np.array(panorama)
 
-    # Create a mask where non-zero pixels are in the panorama
-    gray = cv2.cvtColor(panorama, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, 1, 255, cv2.THRESH_BINARY)
+    # Check if the panorama is in landscape mode
+    w, h = panorama.shape[1], panorama.shape[0]
+    if w < h:
+        panorama = cv2.rotate(panorama, cv2.ROTATE_90_CLOCKWISE)
+        panorama_mask = cv2.rotate(panorama_mask*255, cv2.ROTATE_90_CLOCKWISE)
+        panorama_mask = panorama_mask > 0
 
-    # Find the largest rectangle in the mask
-    x, y, w, h = find_largest_rectangle(mask)
+    w, h = panorama.shape[1], panorama.shape[0]
+    centers = panorama_mask.T @ np.arange(h) / h
+    centers = find_fitting_curve(centers)
 
-    # Crop the panorama to this rectangle
-    rectangled = panorama[y:y+h, x:x+w]
+    h_count = np.sum(panorama_mask, axis=0)
 
-    # Convert back to PIL Image for consistency
-    return Image.fromarray(rectangled)
+    new_w = w
+    new_h = h
+
+    x = np.arange(new_w)
+    y = np.arange(new_h)
+    x, y = np.meshgrid(x, y)
+    x = x.astype(np.float32)
+    y = y.astype(np.float32)
+
+    y += centers[np.newaxis, :] - new_h / 2
+
+    transformed_panorama = cv2.remap(
+        panorama, x, y, interpolation=cv2.INTER_LINEAR)
+    transformed_mask = cv2.remap(
+        panorama_mask.astype(np.uint8), x, y, interpolation=cv2.INTER_NEAREST)
+    transformed_mask = transformed_mask > 0
+
+    good_row = np.sum(transformed_mask, axis=1) >= w * 0.8
+
+    rectangle = transformed_panorama[good_row]
+    rectangle_mask = transformed_mask[good_row]
+
+    holes = (rectangle_mask == 0).astype(np.uint8)
+
+    final_panorama = cv2.inpaint(
+        rectangle, holes, 10,  cv2.INPAINT_TELEA)
+
+    return final_panorama

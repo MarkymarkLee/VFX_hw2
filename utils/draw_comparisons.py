@@ -10,11 +10,25 @@ def draw_comparisons(images, consistent_matches):
         images: List of tuples (image_file, image_array).
         consistent_matches: Dictionary of consistent matches.
     """
-    image_dict = {img_file: img for img_file, img in images}
+    image_dict = {img_file: img for img_file, img, _ in images}
     for pairs, (H, keypoints) in consistent_matches.items():
         img1 = image_dict[pairs[0]]
         img2 = image_dict[pairs[1]]
-        canvas = np.hstack((img1, img2))
+
+        # Ensure both images have the same height by padding or resizing
+        h1, w1 = img1.shape[:2]
+        h2, w2 = img2.shape[:2]
+        if h1 != h2:
+            if h1 > h2:
+                padding = h1 - h2
+                img2 = cv2.copyMakeBorder(
+                    img2, 0, padding, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+            else:
+                padding = h2 - h1
+                img1 = cv2.copyMakeBorder(
+                    img1, 0, padding, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+
+        canvas = np.hstack((img2, img1))
         img_file = f"{pairs[0]}_{pairs[1]}"
 
         print(f"Drawing comparisons for: {img_file}")

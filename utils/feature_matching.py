@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 
-def match_features(features_dict, ratio_threshold=0.8, cross_check=True, max_distance=0.2):
+def match_features(features_dict, ratio_threshold=0.8, cross_check=True, max_distance=0.4):
     """
     Match features between image pairs using ratio test
 
@@ -25,6 +25,7 @@ def match_features(features_dict, ratio_threshold=0.8, cross_check=True, max_dis
     # For each pair of images
     for i in range(len(image_names)):
         img1 = image_names[i]
+        print(f"Matching features for {img1}...", end='\r')
         desc1 = features_dict[img1]['descriptors']
         kp1 = features_dict[img1]['keypoints']
 

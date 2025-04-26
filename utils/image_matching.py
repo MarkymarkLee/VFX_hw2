@@ -35,26 +35,27 @@ def estimate_homography(src_points, dst_points):
 
     # Create matrix A for DLT
     A = []
+    b = []
     for i in range(len(src_points)):
         x, y = src_points[i]
         u, v = dst_points[i]
 
-        A.append([x, y, 1, 0, 0, 0, -u*x, -u*y, -u])
-        A.append([0, 0, 0, x, y, 1, -v*x, -v*y, -v])
+        A.append([x, y, 1, 0, 0, 0])
+        A.append([0, 0, 0, x, y, 1])
+        b.append([u])
+        b.append([v])
 
     A = np.array(A)
+    b = np.array(b)
 
-    # Solve for h (SVD)
-    _, _, Vt = np.linalg.svd(A)
-    h = Vt[-1]
+    # Solve for h
+    new_A = A.T @ A
+    new_b = A.T @ b
+    h = np.linalg.solve(new_A, new_b)
+    h = h.reshape(2, 3)
+    h = np.append(h, np.array([0, 0, 1]))
 
-    # Reshape to 3x3 matrix
-    H = h.reshape(3, 3)
-
-    # Normalize
-    H = H / H[2, 2]
-
-    return H
+    return h.reshape(3, 3)
 
 
 def calc_inliers(H, src_points, dst_points, distance_threshold):
@@ -90,7 +91,7 @@ def calc_inliers(H, src_points, dst_points, distance_threshold):
     return inliers
 
 
-def ransac_homography(matches, max_iterations=10000, distance_threshold=3.0):
+def ransac_homography(matches, max_iterations=5000, distance_threshold=2.0):
     """
     Use RANSAC to find the best homography matrix
 
@@ -142,6 +143,9 @@ def ransac_homography(matches, max_iterations=10000, distance_threshold=3.0):
 
     # If no good model found
     if best_H is None:
+        return None, []
+
+    if len(best_inlier_indices) < 4:
         return None, []
 
     # Refine homography using all inliers

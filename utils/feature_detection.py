@@ -88,7 +88,7 @@ def harris_corner_detector(image, k=0.05, threshold=0.01, window_size=5):
     return corners
 
 
-def get_msop_features(image, depth=4):
+def get_msop_features(image, mask, depth=4):
     """
     Extract Multi-Scale Oriented Patches (MSOP) descriptors
 
@@ -174,11 +174,16 @@ def get_msop_features(image, depth=4):
         scores = f_HM[corners[:, 0], corners[:, 1]]
         depths = np.ones(corners.shape[0], dtype=np.float32) * i
 
+        corners *= 2 ** i
+
         cur_points = np.array(
             [corners[:, 1], corners[:, 0], theta, scores, depths]).T
 
+        corners = corners.astype(np.int32)
+        available_points = mask[corners[:, 0], corners[:, 1]] == 1
+
         # make all interesting points into a numpy array of [x, y, theta, score]
-        interesting_points.append(cur_points)
+        interesting_points.append(cur_points[available_points])
 
     interesting_points = np.concatenate(interesting_points, axis=0)
 
@@ -225,7 +230,8 @@ def get_msop_descriptors(image, points, patch_size=10, spacing=2):
 
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    image = np.float32(image)
+
+    image = np.float32(image) / 255
 
     patch_indices = []
     # create a patch index [[0,0], [0,1], [0,2], ... , [1,0], ..., [patch_size-1, patch_size-1]]
@@ -260,6 +266,7 @@ def get_msop_descriptors(image, points, patch_size=10, spacing=2):
         patch_indices[:, :, 1], 0, image.shape[0] - 1)
 
     features = image[patch_indices[:, :, 1], patch_indices[:, :, 0]]
+    features = features.reshape(n, -1)
 
     return points, features
 
@@ -298,7 +305,7 @@ def draw_points(image_file, image, corners, output_folder):
     cv2.imwrite(output_path, image)
 
 
-def detect_features(image_file, image, output_folder, max_points=1000, draw=False):
+def detect_features(image_file, image, mask, output_folder, max_points=500, draw=False):
     """
     Detect features in an image using Harris corner detector and MSOP descriptors
 
@@ -310,7 +317,7 @@ def detect_features(image_file, image, output_folder, max_points=1000, draw=Fals
         features: Dictionary containing keypoints and descriptors
     """
 
-    keypoints = get_msop_features(image)
+    keypoints = get_msop_features(image, mask)
 
     keypoints = adaptive_non_maximal_suppression(keypoints, max_points)
 
