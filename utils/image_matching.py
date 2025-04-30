@@ -29,9 +29,9 @@ def estimate_homography(src_points, dst_points):
     Returns:
         H: 3x3 homography matrix
     """
-    if len(src_points) < 4 or len(dst_points) < 4:
+    if len(src_points) < 3 or len(dst_points) < 3:
         raise ValueError(
-            "At least 4 points are required to estimate homography")
+            "At least 3 points are required to estimate homography")
 
     # Create matrix A for DLT
     A = []
@@ -42,6 +42,7 @@ def estimate_homography(src_points, dst_points):
 
         A.append([x, y, 1, 0, 0, 0])
         A.append([0, 0, 0, x, y, 1])
+
         b.append([u])
         b.append([v])
 
@@ -91,7 +92,7 @@ def calc_inliers(H, src_points, dst_points, distance_threshold):
     return inliers
 
 
-def ransac_homography(matches, max_iterations=5000, distance_threshold=2.0):
+def ransac_homography(matches, max_iterations=10000, distance_threshold=2):
     """
     Use RANSAC to find the best homography matrix
 
@@ -119,7 +120,7 @@ def ransac_homography(matches, max_iterations=5000, distance_threshold=2.0):
 
     for _ in range(max_iterations):
         # Randomly select 4 matches
-        random_indices = np.random.choice(num_matches, 4, replace=False)
+        random_indices = np.random.choice(num_matches, 3, replace=False)
 
         # Get points for selected matches
         sample_src = [src_points[i] for i in random_indices]
@@ -164,7 +165,7 @@ def ransac_homography(matches, max_iterations=5000, distance_threshold=2.0):
     return refined_H, inliers
 
 
-def filter_pairs_by_matches(feature_matches, max_matches_per_image=6):
+def filter_pairs_by_matches(feature_matches, max_matches_per_image=3):
     # Collect all matches for each image
     image_matches = {}
     for pair, matches in feature_matches.items():

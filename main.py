@@ -10,6 +10,7 @@ from utils.feature_detection import detect_features
 from utils.feature_matching import match_features
 from utils.image_matching import match_images
 from utils.rectangling import rectangle_panorama
+random = np.random.RandomState(42)
 
 
 def find_focal_lengths(input_folder):
@@ -29,6 +30,11 @@ def find_focal_lengths(input_folder):
             current_image = os.path.basename(line)
         elif current_image is not None and len(line.split()) == 1:
             try:
+                if float(line) <= 0:
+                    print(
+                        f"Skipping invalid focal length {line} for {current_image}.")
+                    current_image = None
+                    continue
                 focal_lengths[current_image] = float(line)
                 current_image = None
             except ValueError:
@@ -55,7 +61,22 @@ def find_images(input_folder):
     return image_files
 
 
-def create_panoramas(input_folder, output_folder):
+def setup_outputs(output_folder):
+    """
+    Create output folders for results
+
+    Args:
+        output_folder (str): Path to save the output panorama
+    """
+    os.makedirs(output_folder, exist_ok=True)
+    os.makedirs(os.path.join(output_folder, "1_cylindrical"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder, "2_features"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder, "3_comparisons"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder, "4_direct_warps"), exist_ok=True)
+    os.makedirs(os.path.join(output_folder, "5_blended_images"), exist_ok=True)
+
+
+def create_panoramas(input_folder, output_folder, result_only):
     """
     Main function to create panorama from multiple images
 
@@ -72,7 +93,7 @@ def create_panoramas(input_folder, output_folder):
 
     if os.path.exists(output_folder):
         shutil.rmtree(output_folder)
-    os.makedirs(output_folder, exist_ok=True)
+    setup_outputs(output_folder)
 
     focal_lengths = find_focal_lengths(input_folder)
 
@@ -81,11 +102,14 @@ def create_panoramas(input_folder, output_folder):
     assert len(image_files) > 0, "No images found in the input folder."
     print(f"Found {len(image_files)} images in {input_folder}")
 
-    # Read images and convert to RGB
+    # Read images
     images = []
     for img_file in image_files:
         img_path = os.path.join(input_folder, img_file)
         img = cv2.imread(img_path)
+        scale = max(img.shape[0], img.shape[1]) / 1024
+        if scale > 1:
+            img = cv2.resize(img, (0, 0), fx=1/scale, fy=1/scale)
         images.append((img_file, np.array(img)))
 
     # 0. Cylindrical projection
@@ -98,20 +122,25 @@ def create_panoramas(input_folder, output_folder):
     for i in range(len(images)):
         img_file, img = images[i]
         focal_length = focal_lengths.get(img_file, None)
-        assert focal_length is not None, f"Focal length not found for {img_file}"
+        if focal_length is None:
+            print(
+                f"Focal length not found for {img_file}. Using default radius.")
+            focal_length = radius
         img, mask = cylindrical_project(img, focal_length)
         images[i] = (img_file, img, mask)
-        # cv2.imwrite(os.path.join(output_folder, "projected_" + img_file), img)
+        if not result_only:
+            cv2.imwrite(os.path.join(output_folder,
+                                     "1_cylindrical", "projected_" + img_file), img)
         # cv2.imwrite(os.path.join(output_folder,
         #             "projected_mask_" + img_file), mask * 255)
 
     # 1. Detect features in all images
     print("Detecting features...")
     features = {}
-    for img_file, img, mask in images:
-        print(f"Processing {img_file}...", end='\r')
+    for i, (img_file, img, mask) in enumerate(images):
+        print(f"Processing image {i + 1}/{len(images)}", end='\r')
         features[img_file] = detect_features(
-            img_file, img, mask, output_folder)
+            img_file, img, mask, output_folder, draw=not result_only)
 
     print("\nFeature detection complete.")
 
@@ -123,18 +152,21 @@ def create_panoramas(input_folder, output_folder):
     print("Finding consistent image matches...")
     consistent_matches = match_images(matches)
 
-    # draw_comparisons(images, consistent_matches)
+    if not result_only:
+        draw_comparisons(images, consistent_matches, output_folder)
 
     # 5. Perform image blending
     print("Blending images...")
     panorama, panorama_mask = blend_images(
-        images, consistent_matches, focal_lengths)
-    cv2.imwrite(os.path.join(output_folder, "cropped_panorama.jpg"), panorama)
+        images, consistent_matches, output_folder, draw=not result_only)
+    cv2.imwrite(os.path.join(output_folder,
+                "8_cropped_panorama.jpg"), panorama)
 
     # 6. Rectangle the panorama
     print("Rectangling the panorama...")
     panorama = rectangle_panorama(panorama, panorama_mask)
     cv2.imwrite(os.path.join(output_folder, "panorama.jpg"), panorama)
+    cv2.imwrite("result.png", panorama)
 
 
 def main():
@@ -144,9 +176,11 @@ def main():
                         help='Input folder containing images')
     parser.add_argument('--output', '-o', default='outputs/',
                         help='Output folder')
+    parser.add_argument('--result-only', '-r', action='store_true',
+                        help='Only show the result image')
     args = parser.parse_args()
 
-    create_panoramas(args.input, args.output)
+    create_panoramas(args.input, args.output, args.result_only)
 
 
 if __name__ == "__main__":

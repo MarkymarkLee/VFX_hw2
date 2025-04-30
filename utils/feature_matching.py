@@ -37,6 +37,7 @@ def match_features(features_dict, ratio_threshold=0.8, cross_check=True, max_dis
         norms1 = np.sqrt(np.sum(desc1 * desc1, axis=1))
         norms1[norms1 == 0] = 1  # Avoid division by zero
         desc1_normalized = desc1 / norms1[:, np.newaxis]
+        # desc1_normalized = desc1
 
         for j in range(i + 1, len(image_names)):
             img2 = image_names[j]
@@ -51,6 +52,7 @@ def match_features(features_dict, ratio_threshold=0.8, cross_check=True, max_dis
             norms2 = np.sqrt(np.sum(desc2 * desc2, axis=1))
             norms2[norms2 == 0] = 1
             desc2_normalized = desc2 / norms2[:, np.newaxis]
+            # desc2_normalized = desc2
 
             # Create KDTree for the second image descriptors
             tree = KDTree(desc2_normalized)

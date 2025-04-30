@@ -88,7 +88,7 @@ def harris_corner_detector(image, k=0.05, threshold=0.01, window_size=5):
     return corners
 
 
-def get_msop_features(image, mask, depth=4):
+def get_msop_features(image, mask, depth=3):
     """
     Extract Multi-Scale Oriented Patches (MSOP) descriptors
 
@@ -105,7 +105,7 @@ def get_msop_features(image, mask, depth=4):
 
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    image = np.float32(image)
+    image = np.float32(image) / 255
 
     pyramid = [image]
     # Create Gaussian pyramid
@@ -151,7 +151,7 @@ def get_msop_features(image, mask, depth=4):
 
         f_HM = det / (trace + 1e-6)
 
-        threshold_mask = f_HM > 10
+        threshold_mask = f_HM > 0.01
 
         padded_f_HM = np.pad(f_HM, ((1, 1), (1, 1)), mode='constant')
         local_max = np.ones_like(f_HM, dtype=bool)
@@ -228,8 +228,8 @@ def get_msop_descriptors(image, points, patch_size=10, spacing=2):
     n = points.shape[0]
     m = patch_size * patch_size
 
-    if image.ndim == 3:
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # if image.ndim == 3:
+    #     image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
     image = np.float32(image) / 255
 
@@ -283,6 +283,9 @@ def draw_points(image_file, image, corners, output_folder):
     Returns:
         None
     """
+
+    image = image.copy()
+
     # Convert to color if needed
     if len(image.shape) == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
@@ -301,11 +304,44 @@ def draw_points(image_file, image, corners, output_folder):
                       color=(0, 0, 255), thickness=1)
 
     # Save the image with corners drawn
-    output_path = os.path.join(output_folder, "corners_" + image_file)
+    output_path = os.path.join(
+        output_folder, "2_features", "corners_" + image_file)
     cv2.imwrite(output_path, image)
 
 
-def detect_features(image_file, image, mask, output_folder, max_points=500, draw=False):
+def draw_raw_corners(image_file, image, corners, output_folder, name):
+    """
+    Draw corners on the image and save to output folder
+
+    Args:
+        image: Input image
+        corners: List of corner coordinates (x, y)
+        output_folder: Folder to save the output images
+
+    Returns:
+        None
+    """
+
+    image = image.copy()
+
+    # Convert to color if needed
+    if len(image.shape) == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    # Draw corners
+    for c in corners:
+        x = int(c[0])
+        y = int(c[1])
+        size = 3
+        cv2.circle(image, (x, y), size, (0, 0, 255), -1)
+
+    # Save the image with corners drawn
+    output_path = os.path.join(
+        output_folder, "corners", f"{name}_" + image_file)
+    cv2.imwrite(output_path, image)
+
+
+def detect_features(image_file, image, mask, output_folder, max_points=1000, draw=True):
     """
     Detect features in an image using Harris corner detector and MSOP descriptors
 
@@ -316,6 +352,8 @@ def detect_features(image_file, image, mask, output_folder, max_points=500, draw
     Returns:
         features: Dictionary containing keypoints and descriptors
     """
+
+    keypoints = harris_corner_detector(image)
 
     keypoints = get_msop_features(image, mask)
 

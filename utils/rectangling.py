@@ -19,7 +19,7 @@ def find_fitting_curve(points):
     return new_points
 
 
-def rectangle_panorama(panorama, panorama_mask, window=50):
+def rectangle_panorama(panorama, panorama_mask):
     """
     Rectangles the panorama image using the provided mask.
 

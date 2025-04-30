@@ -1,9 +1,9 @@
-from copy import deepcopy
+import os
 import numpy as np
 import cv2
 from PIL import Image
 
-from utils.cylindrical_projection import project_to_canvas, cylindrical_project_points
+from utils.cylindrical_projection import project_to_canvas
 
 
 def GaussianPyramid(img, level):
@@ -236,7 +236,7 @@ def calc_canvas(homographies, blend_order, image_dict):
     return all_pts
 
 
-def draw_bounding_box(best_size, best_homographies, translation, image_dict, blend_order, cropped_box):
+def draw_bounding_box(best_size, best_homographies, translation, image_dict, blend_order, cropped_box, output_folder):
     # draw the bounding box
     canvas = np.zeros((best_size[1], best_size[0], 3), dtype=np.uint8)
     for i, (image_name, _, _) in enumerate(blend_order):
@@ -261,10 +261,10 @@ def draw_bounding_box(best_size, best_homographies, translation, image_dict, ble
     cv2.rectangle(canvas, (cropped_box[0], cropped_box[1]),
                   (cropped_box[0] + cropped_box[2], cropped_box[1] + cropped_box[3]), (255, 0, 0), 2)
 
-    cv2.imwrite("outputs/bounding_box.png", canvas)
+    cv2.imwrite(os.path.join(output_folder, "6_bounding_box.png"), canvas)
 
 
-def get_canvas_data(image_dict, blend_order, focal_lengths):
+def get_canvas_data(image_dict, blend_order, output_folder, draw):
     """
     Get the canvas size for blending images
 
@@ -319,8 +319,9 @@ def get_canvas_data(image_dict, blend_order, focal_lengths):
 
         cropped_box = (0, cropped_min_y-min_y, cropped_width, cropped_height)
     # draw the bounding box
-    # draw_bounding_box(size, homographies, translation,
-    #                   image_dict, blend_order, cropped_box)
+    if draw:
+        draw_bounding_box(size, homographies, translation,
+                          image_dict, blend_order, cropped_box, output_folder)
 
     return {
         "canvas_size": size,
@@ -330,7 +331,7 @@ def get_canvas_data(image_dict, blend_order, focal_lengths):
     }
 
 
-def blend_images(images, consistent_matches, focal_lengths):
+def blend_images(images, consistent_matches, output_folder, draw):
     """
     Blend images to create a panorama using multiband blending
 
@@ -362,7 +363,7 @@ def blend_images(images, consistent_matches, focal_lengths):
     blend_order = create_blending_order(graph, central_node)
     print(f"Blending order: {[(img[0], img[1]) for img in blend_order]}")
 
-    data = get_canvas_data(image_dict, blend_order, focal_lengths)
+    data = get_canvas_data(image_dict, blend_order, output_folder, draw)
     width, height = data["canvas_size"]
     translation = data["translation"]
     homographies = data["homographies"]
@@ -379,8 +380,9 @@ def blend_images(images, consistent_matches, focal_lengths):
         homography = homographies[image_name]
 
         if image_name.endswith("_L"):
-            image_name = image_name[:-2]
-        image, mask = image_dict[image_name]
+            image, mask = image_dict[image_name[:-2]]
+        else:
+            image, mask = image_dict[image_name]
 
         warped_image, warped_mask = project_to_canvas(
             image, mask,
@@ -391,6 +393,13 @@ def blend_images(images, consistent_matches, focal_lengths):
             panorama, panorama_mask, warped_image, warped_mask)
 
         panorama_mask = panorama_mask | warped_mask
+        if draw:
+            if image_name.endswith("_L"):
+                cv2.imwrite(os.path.join(output_folder,
+                            "7_end_to_end_panorama.jpg"), panorama)
+            else:
+                cv2.imwrite(os.path.join(output_folder, "5_blended_images",
+                            f"blended_{image_name}"), panorama)
 
     cropped_panorama = np.zeros(
         (cropped_box[3], cropped_box[2], 3), dtype=np.uint8)

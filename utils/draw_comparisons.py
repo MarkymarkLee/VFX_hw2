@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 
-def draw_comparisons(images, consistent_matches):
+def draw_comparisons(images, consistent_matches, output_folder):
     """
     Draw comparisons between images based on consistent matches.
 
@@ -28,7 +28,7 @@ def draw_comparisons(images, consistent_matches):
                 img1 = cv2.copyMakeBorder(
                     img1, 0, padding, 0, 0, cv2.BORDER_CONSTANT, value=(255, 255, 255))
 
-        canvas = np.hstack((img2, img1))
+        canvas = np.hstack((img1, img2))
         img_file = f"{pairs[0]}_{pairs[1]}"
 
         print(f"Drawing comparisons for: {img_file}")
@@ -44,7 +44,8 @@ def draw_comparisons(images, consistent_matches):
             cv2.circle(canvas, right_point, 5, (255, 0, 0), -1)
 
         # Save or display the image with drawn comparisons
-        cv2.imwrite(f"outputs/{img_file}_comparisons.jpg", canvas)
+        cv2.imwrite(
+            f"{output_folder}/3_comparisons/{img_file}_comparisons.jpg", canvas)
 
         # warp the images using the homography matrix
 
@@ -84,4 +85,5 @@ def draw_comparisons(images, consistent_matches):
         canvas = cv2.warpPerspective(
             img2, translation_matrix @ np.eye(3), (width, height), dst=canvas, flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_TRANSPARENT)
         # Save or display the image with drawn comparisons
-        cv2.imwrite(f"outputs/{img_file}_warped.jpg", canvas)
+        cv2.imwrite(
+            f"{output_folder}/4_direct_warps/{img_file}_warped.jpg", canvas)
